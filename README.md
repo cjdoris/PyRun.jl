@@ -48,8 +48,7 @@ The locals is a named tuple or dict defining the locals when running the code. M
 `nothing` to run the code in global scope.
 
 The module `jl` is available to the code. You may call `jl.ret(x)` to return `x` from the
-code. You can control the returned format with `jl.ret(x, fmt)`, such as
-`jl.ret(x, jl.Int())`.
+code. You can control the returned format with `jl.ret(x, fmt)` - see the examples below.
 
 ## Examples
 
