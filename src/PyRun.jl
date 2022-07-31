@@ -196,4 +196,30 @@ function (f::PyRef)(args...; kw...)
     return pyrun(_proc(f), "jl.ret(f(*args, **kwargs), jl.Ref())", locals=(; f, args, kwargs=NamedTuple(kw)))::PyRef
 end
 
+function Base.getindex(x::PyRef, k)
+    return pyrun(_proc(x), "jl.ret(x[k], jl.Ref())", locals=(; x, k))::PyRef
+end
+
+function Base.getindex(x::PyRef, k...)
+    return getindex(x, k)
+end
+
+function Base.setindex!(x::PyRef, v, k)
+    pyrun(_proc(x), "x[k] = v", locals=(; x, k, v))::Nothing
+    return x
+end
+
+function Base.setindex!(x::PyRef, v, k...)
+    return setindex!(x, v, k)
+end
+
+function Base.delete!(x::PyRef, k)
+    pyrun(_proc(x), "del x[k]", locals=(; x, k))::Nothing
+    return x
+end
+
+function Base.length(x::PyRef)
+    return pyrun(_proc(x), "jl.ret(len(x), jl.Int())", locals=(; x))::Int
+end
+
 end # module
