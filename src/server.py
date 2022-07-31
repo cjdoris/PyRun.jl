@@ -4,6 +4,7 @@ import json
 import collections.abc
 import numbers
 import base64
+import io
 
 DEBUG = False
 def debug(*args, force=False):
@@ -179,6 +180,194 @@ class TupleFormat(Format):
             f = elfmt.format
             return {'t': 'tuple', 'v': [f(x) for x in value]}
 
+class BufferFormat(Format):
+    def _format(self, value):
+        m = memoryview(value)
+        assert m.ndim == len(m.shape)
+        data = m.tobytes(order='F')
+        assert m.nbytes == len(data)
+        return {
+            't': 'buffer',
+            'v': {
+                'format': m.format,
+                'itemsize': m.itemsize,
+                'nbytes': m.nbytes,
+                'ndim': m.ndim,
+                'shape': m.shape,
+                'data': base64.b64encode(data).decode('ascii'),
+            }
+        }
+
+class NDArrayFormat(Format):
+    def __init__(self, ndim=None, isarray=False, **kw):
+        self.ndim = ndim
+        self.isarray = isarray
+        super().__init__(**kw)
+    def _format(self, value):
+        if self.isarray:
+            t = type(value)
+            if (getattr(t, '__array__', None) is None and
+                getattr(t, '__array_struct__', None) is None and
+                getattr(t, '__array_interface__', None) is None
+            ):
+                raise TypeError('not an array')
+        import numpy.lib.format
+        arr = numpy.array(value, ndmin=self.ndim or 0)
+        if self.ndim is not None and self.ndim != arr.ndim:
+            raise TypeError('incorrect number of dimensions')
+        data = arr.tobytes(order='F')
+        dtype = arr.dtype
+        if dtype.hasobject:
+            raise TypeError('cannot serialise arrays containing Python objects (must be plain bits)')
+        assert arr.ndim == len(arr.shape)
+        return {
+            't': 'ndarray',
+            'v': {
+                'dtype': numpy.lib.format.dtype_to_descr(arr.dtype),
+                'ndim': arr.ndim,
+                'shape': arr.shape,
+                'data': base64.b64encode(data).decode('ascii'),
+            },
+        }
+
+class BaseMediaFormat(Format):
+    def __init__(self, mimes, **kw):
+        if isinstance(mimes, str):
+            mimes = [mimes]
+        else:
+            mimes = list(mimes)
+        self.mimes = mimes
+        super().__init__(**kw)
+
+class MimebundleMediaFormat(BaseMediaFormat):
+    def _format(self, value):
+        try:
+            ans = type(value)._repr_mimebundle_(value, include=self.mimes)
+            if isinstance(ans, tuple):
+                ans = ans[0]
+            mimes = [mime for mime in self.mimes if mime in ans]
+            mime = mimes[0]
+            ans = ans[mime]
+            if isinstance(ans, str):
+                ans = ans.encode('utf-8')
+            return {
+                't': 'media',
+                'v': {
+                    'mime': mime,
+                    'data': base64.b64encode(ans).decode('ascii'),
+                }
+            }
+        except:
+            raise TypeError('not supported')
+
+REPR_METHODS = {
+    "text/plain": "__repr__",
+    "text/html": "_repr_html_",
+    "text/markdown": "_repr_markdown_",
+    "text/json": "_repr_json_",
+    "text/latex": "_repr_latex_",
+    "application/javascript": "_repr_javascript_",
+    "application/pdf": "_repr_pdf_",
+    "image/jpeg": "_repr_jpeg_",
+    "image/png": "_repr_png_",
+    "image/svg+xml": "_repr_svg_",
+}
+
+class ReprMediaFormat(BaseMediaFormat):
+    def _format(self, value):
+        for mime in self.mimes:
+            try:
+                method = REPR_METHODS[mime]
+                ans = getattr(type(value), method)(value)
+                if isinstance(ans, tuple):
+                    ans = ans[0]
+                if isinstance(ans, str):
+                    ans = ans.encode('utf-8')
+                return {
+                    't': 'media',
+                    'v': {
+                        'mime': mime,
+                        'data': base64.b64encode(ans).decode('ascii'),
+                    }
+                }
+            except Exception:
+                pass
+        raise TypeError('not supported')
+
+PYPLOT_FORMATS = {
+    'image/png': 'png',
+    'image/jpeg': 'jpeg',
+    'image/tiff': 'tiff',
+    'image/svg+xml': 'svg',
+    'application/pdf': 'pdf',
+}
+
+class PyplotMediaFormat(BaseMediaFormat):
+    def _format(self, value):
+        try:
+            if 'matplotlib' not in sys.modules:
+                raise TypeError()
+            import matplotlib.pyplot as plt
+            fig = value
+            while not isinstance(fig, plt.Figure):
+                fig = fig.figure
+            for mime in self.mimes:
+                try:
+                    fmt = PYPLOT_FORMATS[mime]
+                    buf = io.BytesIO()
+                    fig.savefig(buf, format=fmt, bbox_inches='tight')
+                    plt.close(fig)
+                    return {
+                        't': 'media',
+                        'v': {
+                            'mime': mime,
+                            'data': base64.b64encode(buf.getvalue()).decode('ascii'),
+                        }
+                    }
+                except Exception:
+                    raise TypeError()
+        except Exception:
+            raise TypeError('not supported')
+
+class BokehMediaFormat(BaseMediaFormat):
+    def _format(self, value):
+        if 'text/html' not in self.mimes:
+            raise TypeError('only text/html is supported')
+        try:
+            if 'bokeh' not in sys.modules:
+                raise TypeError()
+            from bokeh.models import LayoutDOM
+            from bokeh.embed.standalone import autoload_static
+            from bokeh.resources import CDN
+            if not isinstance(value, LayoutDOM):
+                raise TypeError()
+            script, html = autoload_static(value, CDN, '')
+            # TODO: this is quick hacky
+            src = ' src=""'
+            endscript = '</script>'
+            assert src in html
+            assert endscript in html
+            html = html.replace(' src=""', '')
+            html = html.replace(endscript, script.strip()+endscript)
+            return {
+                't': 'media',
+                'v': {
+                    'mime': 'text/html',
+                    'data': base64.b64encode(html.encode('utf-8')).decode('ascii')
+                }
+            }
+        except Exception:
+            raise TypeError('not supported')
+
+MEDIA_FORMATS = [
+    BokehMediaFormat,
+    PyplotMediaFormat,
+    MimebundleMediaFormat,
+    ReprMediaFormat,
+]
+def MediaFormat(*args, **kw):
+    return UnionFormat(*[t(*args, **kw) for t in MEDIA_FORMATS])
+
 ANY_FORMAT.formats.extend([
     NoneFormat(),
     BoolFormat(isa=bool),
@@ -191,6 +380,7 @@ ANY_FORMAT.formats.extend([
     TupleFormat(isa=tuple),
     ListFormat(isa=collections.abc.Sequence),
     SetFormat(isa=collections.abc.Set),
+    NDArrayFormat(isarray=True),
     RefFormat(),
 ])
 
@@ -211,6 +401,19 @@ FORMATS['list'] = ListFormat
 FORMATS['tuple'] = TupleFormat
 FORMATS['set'] = SetFormat
 FORMATS['bytes'] = BytesFormat
+FORMATS['buffer'] = BufferFormat
+FORMATS['array'] = NDArrayFormat
+FORMATS['media/bokeh'] = BokehMediaFormat
+FORMATS['media/pyplot'] = PyplotMediaFormat
+FORMATS['media/repr'] = ReprMediaFormat
+FORMATS['media/mimebundle'] = MimebundleMediaFormat
+FORMATS['media'] = MediaFormat
+FORMATS['png'] = lambda: MediaFormat('image/png')
+FORMATS['html'] = lambda: MediaFormat('text/html')
+FORMATS['jpeg'] = lambda: MediaFormat('image/jpeg')
+FORMATS['tiff'] = lambda: MediaFormat('image/tiff')
+FORMATS['svg'] = lambda: MediaFormat('image/svg+xml')
+FORMATS['pdf'] = lambda: MediaFormat('application/pdf')
 
 jl = type(sys)(__name__ + '.jl')
 jl.ret = ret
