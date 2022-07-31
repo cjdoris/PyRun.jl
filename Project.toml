@@ -1,0 +1,9 @@
+name = "PyRun"
+uuid = "eb2b24dc-9614-45ec-90bf-07ac272c6bc3"
+authors = ["Christopher Doris <github.com/cjdoris>"]
+version = "0.1.0"
+
+[deps]
+CondaPkg = "992eb4ea-22a4-4c89-a5bb-47a3300528ab"
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
