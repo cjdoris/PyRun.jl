@@ -82,7 +82,7 @@ julia> pyrun("jl.ret([1, 2, 3])")
 
 Explicitly convert to a PyRef (supports attributes, indexing, calling, etc.):
 ```julia
-julia> x = pyrun("jl.ret([1, 2, 3], jl.Ref())")
+julia> x = pyrun("jl.ret([1, 2, 3], 'ref')")
 PyRef: [1, 2, 3]
 
 julia> length(x)
