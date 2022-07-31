@@ -192,8 +192,6 @@ async def do_run(writer, msg):
         gbls = get_scope(msg['scope'])
         lcls = get_locals(msg['locals'])
         exec(code, gbls, lcls)
-        sys.stdout.flush()
-        sys.stderr.flush()
         out = {
             'tag': 'result',
             'result': None,
@@ -209,6 +207,8 @@ async def do_run(writer, msg):
             'type': type(exc).__name__,
             'str': str(exc),
         }
+    sys.stdout.flush()
+    sys.stderr.flush()
     out['id'] = msg['id']
     await send(writer, out)
 
