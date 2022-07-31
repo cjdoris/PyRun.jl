@@ -3,6 +3,7 @@ import sys
 import json
 import collections.abc
 import numbers
+import base64
 
 DEBUG = False
 def debug(*args, force=False):
@@ -54,6 +55,19 @@ def del_ref(r):
 class Result(Exception):
     pass
 
+FORMATS = {}
+def to_format(x):
+    if isinstance(x, Format):
+        return x
+    if isinstance(x, tuple):
+        args = x[1:]
+        x = x[0]
+    else:
+        args = ()
+    if isinstance(x, str):
+        x = FORMATS[x]
+    return x(*args)
+
 class Format:
     def __init__(self, isa=None):
         self.isa = isa
@@ -77,6 +91,10 @@ class StrFormat(Format):
     def _format(self, value):
         return str(value)
 
+class BytesFormat(Format):
+    def _format(self, value):
+        return {'t': 'bytes', 'v': base64.b64encode(bytes(value)).decode('ascii')}
+
 class IntFormat(Format):
     def _format(self, value):
         value = int(value)
@@ -85,6 +103,10 @@ class IntFormat(Format):
         else:
             return {'t': 'int', 'v': str(value)}
 
+class RationalFormat(Format):
+    def _format(self, value):
+        return {'t': 'rational', 'v': [str(int(value.numerator)), str(int(value.denominator))]}
+
 class FloatFormat(Format):
     def _format(self, value):
         value = float(value)
@@ -92,13 +114,13 @@ class FloatFormat(Format):
 
 class UnionFormat(Format):
     def __init__(self, *formats, **kw):
-        self.formats = [NoneFormat() if fmt is None else fmt for fmt in formats]
+        self.formats = [to_format(f) for f in formats]
         super().__init__(**kw)
     def _format(self, value):
         for fmt in self.formats:
             try:
                 return fmt.format(value)
-            except TypeError:
+            except (TypeError, ValueError):
                 pass
         raise TypeError('cannot format this')
 
@@ -115,8 +137,8 @@ class RefFormat(UnionFormat):
 
 class DictFormat(Format):
     def __init__(self, keyfmt=AnyFormat(), valfmt=AnyFormat(), **kw):
-        self.keyfmt = keyfmt
-        self.valfmt = valfmt
+        self.keyfmt = to_format(keyfmt)
+        self.valfmt = to_format(valfmt)
         super().__init__(**kw)
     def _format(self, value):
         fk = self.keyfmt.format
@@ -125,38 +147,73 @@ class DictFormat(Format):
 
 class ListFormat(Format):
     def __init__(self, elfmt=AnyFormat(), **kw):
-        self.elfmt = elfmt
+        self.elfmt = to_format(elfmt)
         super().__init__(**kw)
     def _format(self, value):
         f = self.elfmt.format
         return {'t': 'list', 'v': [f(x) for x in value]}
 
+class SetFormat(Format):
+    def __init__(self, elfmt=AnyFormat(), **kw):
+        self.elfmt = to_format(elfmt)
+        super().__init__(**kw)
+    def _format(self, value):
+        f = self.elfmt.format
+        return {'t': 'set', 'v': [f(x) for x in value]}
+
+class TupleFormat(Format):
+    def __init__(self, elfmt=AnyFormat(), **kw):
+        if isinstance(elfmt, list):
+            self.elfmt = [to_format(f) for f in elfmt]
+        else:
+            self.elfmt = to_format(elfmt)
+        super().__init__(**kw)
+    def _format(self, value):
+        value = tuple(value)
+        elfmt = self.elfmt
+        if isinstance(elfmt, list):
+            if len(elfmt) != len(value):
+                raise TypeError('tuple is incorrect length')
+            return {'t': 'tuple', 'v': [f.format(x) for (f, x) in zip(elfmt, value)]}
+        else:
+            f = elfmt.format
+            return {'t': 'tuple', 'v': [f(x) for x in value]}
+
 ANY_FORMAT.formats.extend([
     NoneFormat(),
     BoolFormat(isa=bool),
     StrFormat(isa=str),
+    BytesFormat(isa=(bytes,bytearray)),
     IntFormat(isa=numbers.Integral),
-    FloatFormat(isa=float),
+    RationalFormat(isa=numbers.Rational),
+    FloatFormat(isa=numbers.Real),
     DictFormat(isa=collections.abc.Mapping),
+    TupleFormat(isa=tuple),
     ListFormat(isa=collections.abc.Sequence),
+    SetFormat(isa=collections.abc.Set),
     RefFormat(),
 ])
 
-def ret(val=None, fmt=AnyFormat()):
-    raise Result(fmt.format(val))
+def ret(val=None, fmt='any'):
+    raise Result(to_format(fmt).format(val))
+
+FORMATS['none'] = NoneFormat
+FORMATS['bool'] = BoolFormat
+FORMATS['str'] = StrFormat
+FORMATS['union'] = UnionFormat
+FORMATS['optional'] = OptionalFormat
+FORMATS['any'] = AnyFormat
+FORMATS['int'] = IntFormat
+FORMATS['rational'] = RationalFormat
+FORMATS['float'] = FloatFormat
+FORMATS['ref'] = RefFormat
+FORMATS['list'] = ListFormat
+FORMATS['tuple'] = TupleFormat
+FORMATS['set'] = SetFormat
+FORMATS['bytes'] = BytesFormat
 
 jl = type(sys)(__name__ + '.jl')
 jl.ret = ret
-jl.ret_ref = lambda val: ret(val, RefFormat())
-jl.Bool = BoolFormat
-jl.Str = StrFormat
-jl.Union = UnionFormat
-jl.Optional = OptionalFormat
-jl.Any = AnyFormat
-jl.Int = IntFormat
-jl.Float = FloatFormat
-jl.Ref = RefFormat
-jl.List = ListFormat
 
 def get_locals(lcls):
     if lcls is None:

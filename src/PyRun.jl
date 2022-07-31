@@ -1,6 +1,6 @@
 module PyRun
 
-import CondaPkg, JSON3, Sockets
+import Base64, CondaPkg, JSON3, Sockets
 
 export PyProcess, pyrun, PyRef
 
@@ -58,7 +58,7 @@ end
 const DEFAULT_PROCESS = Ref{Union{PyProcess,Nothing}}(nothing)
 function default_process()
     proc = DEFAULT_PROCESS[]
-    if proc === nothing || !isopen(proc)
+    if proc === nothing
         proc = PyProcess()
         DEFAULT_PROCESS[] = proc
     end
@@ -144,20 +144,32 @@ format_local(p::PyProcess, x::NamedTuple) = (; t="dict", v=[(format_local(p, k),
 
 parse_result(p::PyProcess, res::Union{Nothing,Bool,String,Int}) = res
 
+function _parse_int(v)
+    x = tryparse(Int, v)
+    return x === nothing ? parse(BigInt, v) : x
+end
+
 function parse_result(p::PyProcess, res::JSON3.Object)
     t = res[:t]::String
     v = res[:v]
     if t == "int"
-        x = tryparse(Int, v::String)
-        return x === nothing ? parse(BigInt, v::String) : x
+        return _parse_int(v::String)
     elseif t == "float"
         return parse(Float64, v::String)
+    elseif t == "rational"
+        return _parse_int(v[1]::String) // _parse_int(v[2]::String)
     elseif t == "ref"
         return _pyref(p, v::String)
     elseif t == "list"
         return [parse_result(p, x) for x in v::JSON3.Array]
+    elseif t == "tuple"
+        return Tuple(parse_result(p, x) for x in v::JSON3.Array)
+    elseif t == "set"
+        return Set(parse_result(p, x) for x in v::JSON3.Array)
     elseif t == "dict"
         return Dict(parse_result(p, k) => parse_result(p, v) for (k, v) in v::JSON3.Array)
+    elseif t == "bytes"
+        return Base64.base64decode(v::String)
     else
         return res
     end
@@ -171,21 +183,21 @@ _ref(x::PyRef) = getfield(x, :ref)
 
 _finalize_pyref(x::PyRef) = send(_proc(x), (; tag="delref", ref=_ref(x)))
 
-Base.string(x::PyRef) = pyrun(_proc(x), "jl.ret(str(x), jl.Str())", locals=(; x))::String
+Base.string(x::PyRef) = pyrun(_proc(x), "jl.ret(str(x), 'str')", locals=(; x))::String
 
 Base.print(io::IO, x::PyRef) = print(io, string(x))
 
 function Base.show(io::IO, x::PyRef)
-    s = pyrun(_proc(x), "jl.ret(repr(x), jl.Str())", locals=(; x))::String
+    s = pyrun(_proc(x), "jl.ret(repr(x), 'str')", locals=(; x))::String
     print(io, "PyRef: ", s)
 end
 
 function Base.propertynames(x::PyRef, private::Bool=false)
-    return map(Symbol, pyrun(_proc(x), "jl.ret(dir(x), jl.List(jl.Str()))", locals=(; x))::Vector{String})
+    return map(Symbol, pyrun(_proc(x), "jl.ret(dir(x), ('list', 'str'))", locals=(; x))::Vector{String})
 end
 
 function Base.getproperty(x::PyRef, k::Symbol)
-    return pyrun(_proc(x), "jl.ret(getattr(x, k), jl.Ref())", locals=(; x, k))::PyRef
+    return pyrun(_proc(x), "jl.ret(getattr(x, k), 'ref')", locals=(; x, k))::PyRef
 end
 
 function Base.setproperty!(x::PyRef, k::Symbol, v)
@@ -193,11 +205,11 @@ function Base.setproperty!(x::PyRef, k::Symbol, v)
 end
 
 function (f::PyRef)(args...; kw...)
-    return pyrun(_proc(f), "jl.ret(f(*args, **kwargs), jl.Ref())", locals=(; f, args, kwargs=NamedTuple(kw)))::PyRef
+    return pyrun(_proc(f), "jl.ret(f(*args, **kwargs), 'ref')", locals=(; f, args, kwargs=NamedTuple(kw)))::PyRef
 end
 
 function Base.getindex(x::PyRef, k)
-    return pyrun(_proc(x), "jl.ret(x[k], jl.Ref())", locals=(; x, k))::PyRef
+    return pyrun(_proc(x), "jl.ret(x[k], 'ref')", locals=(; x, k))::PyRef
 end
 
 function Base.getindex(x::PyRef, k...)
@@ -219,7 +231,7 @@ function Base.delete!(x::PyRef, k)
 end
 
 function Base.length(x::PyRef)
-    return pyrun(_proc(x), "jl.ret(len(x), jl.Int())", locals=(; x))::Int
+    return pyrun(_proc(x), "jl.ret(len(x), 'int')", locals=(; x))::Int
 end
 
 end # module
