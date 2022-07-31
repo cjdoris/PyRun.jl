@@ -23,7 +23,7 @@ Disadvantages are:
 - Inter-process communication is slow (rougly 200μs per run), so you should not write tight
   loops in Julia which call Python.
 - No shared memory, since Python is running in a separate process. (But you could use
-  something like Apache Arrow to work.)
+  something like Apache Arrow.)
 
 ## Install
 
