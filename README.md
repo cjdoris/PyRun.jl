@@ -53,30 +53,26 @@ code. You can control the returned format with `jl.ret(x, fmt)`, such as
 
 ## Examples
 
+A simple print statement:
 ```julia
-julia> # A simple print statement
-
 julia> pyrun("print('hello world!')")
 hello world!
 ```
 
+Say hello the given user:
 ```julia
-julia> # Say hello to the user
-
 julia> pyrun("print('hello', name)", locals=(name="alice",))
 hello alice
 ```
 
+Do some arithmetic and return the answer (converted automatically to Int):
 ```julia
-julia> # Do some arithmetic and return the answer (converted automatically to Int)
-
 julia> pyrun("jl.ret(x + y)", locals=(x=1, y=2))
 3
 ```
 
+Make and return a Python list (converted automatically to a vector):
 ```julia
-julia> # Make and return a Python list (converted automatically to a vector)
-
 julia> pyrun("jl.ret([1, 2, 3])")
 3-element Vector{Int64}:
  1
@@ -84,13 +80,10 @@ julia> pyrun("jl.ret([1, 2, 3])")
  3
 ```
 
+Explicitly convert to a PyRef (supports attributes, indexing, calling, etc.):
 ```julia
-julia> # Explicitly convert to a PyRef
-
 julia> x = pyrun("jl.ret([1, 2, 3], jl.Ref())")
 PyRef: [1, 2, 3]
-
-julia> # PyRef supports attributes, indexing, calling, etc.
 
 julia> length(x)
 3
