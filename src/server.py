@@ -5,6 +5,7 @@ import collections.abc
 import numbers
 import base64
 import io
+import random
 
 DEBUG = False
 def debug(*args, force=False):
@@ -499,13 +500,19 @@ async def serve(reader, writer):
 
 async def start_server():
     debug('starting server...')
-    try:
-        server = await asyncio.start_server(serve, '127.0.0.1', 8888)
-    except Exception as exc:
-        print(json.dumps({'status': 'ERROR', 'msg': str(exc)}))
-        sys.stdout.flush()
-        return
-    print(json.dumps({'status': 'READY', 'addr': '127.0.0.1', 'port': 8888}))
+    ntries = 10
+    for ntry in range(ntries):
+        port = random.randrange(49152, 65536)
+        try:
+            server = await asyncio.start_server(serve, '127.0.0.1', port)
+            break
+        except Exception as exc:
+            if ntry < ntries - 1 and isinstance(exc, OSError):
+                continue
+            print(json.dumps({'status': 'ERROR', 'msg': str(exc)}))
+            sys.stdout.flush()
+            return
+    print(json.dumps({'status': 'READY', 'addr': '127.0.0.1', 'port': port}))
     sys.stdout.flush()
     debug('serving...')
     async with server:
