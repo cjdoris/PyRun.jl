@@ -3,7 +3,7 @@ const SERVER_PY = joinpath(@__DIR__, "server.py")
 Base.show(io::IO, p::PyProcess) = print(io, "PyProcess()")
 
 function _finalize_pyprocess(p::PyProcess)
-    isopen(p) && close(p)
+    isopen(p) && @async close(p)
     return
 end
 
@@ -19,6 +19,7 @@ function PyProcess()
     if status == "ERROR"
         error("Python server did not start: $(msg[:msg]::String)")
     end
+    @debug "server started" msg
     @assert status == "READY"
     addr = msg[:addr]::String
     port = msg[:port]::Int
